@@ -1,57 +1,25 @@
 # Assignment 2 - Impact Analysis
 
-## Component Selected: `DeviceServiceImpl`
+## Component Selected: `DeviceServiceImpl.saveDevice()`
 **Path**: `dao/src/main/java/org/thingsboard/server/dao/device/DeviceServiceImpl.java`
 
-`DeviceServiceImpl` is the core core service implementation responsible for managing the lifecycle of Device entities in ThingsBoard. It handles device provisioning, credentials management, attributes, validation, and relationships with other entities like Tenants and Edges.
+I selected the `saveDevice` method (specifically the `doSaveDeviceWithoutCredentials` internal logic) for this analysis. This method contains complex control flow and data manipulation, making it ideal for a **Program Dependency Graph (PDG)** analysis as per the lecture guidelines.
 
-## Impact Analysis Graph: Program Dependency Graph
-The following **Program Dependency Graph (PDG)** illustrates the architectural wiring of `DeviceServiceImpl`. It visualizes the classes and services that `DeviceServiceImpl` depends on to function.
+## Impact Analysis Graph: Program Dependency Graph (PDG)
+The following graph represents the **Statement-Level PDG** for the `saveDevice` logic.
+*   **Nodes**: Represent specific program statements (S1-S9).
+*   **Solid Edges**: Data Dependencies (variable usage).
+*   **Dashed Edges**: Control Dependencies (execution flow based on conditions).
 
-**Legend:**
-*   **Target**: The component being analyzed.
-*   **Infrastructure**: Database access (DAO) and Transaction management.
-*   **Services**: Other business logic modules it orchestrates.
-*   **Validation**: Input checking logic.
-
-```mermaid
-graph LR
-    %% Styles
-    classDef target fill:#ff7675,stroke:#333,stroke-width:2px,color:white,font-weight:bold;
-    classDef infra fill:#74b9ff,stroke:#333,stroke-width:1px,color:black,fill-opacity:0.8;
-    classDef service fill:#fdcb6e,stroke:#333,stroke-width:1px,color:black,fill-opacity:0.8;
-    classDef validation fill:#55efc4,stroke:#333,stroke-width:1px,color:black,fill-opacity:0.8;
-
-    %% Target Component
-    DS[DeviceServiceImpl]:::target
-
-    %% Infrastructure
-    DAO[DeviceDao]:::infra
-    EVT[EventPublisher]:::infra
-
-    %% Core Services
-    DCS[DeviceCredentialsService]:::service
-    DPS[DeviceProfileService]:::service
-    TS[TenantService]:::service
-    ES[EdgeService]:::service
-    RS[RelationService]:::service
-
-    %% Validation Utilities
-    VAL[DeviceDataValidator]:::validation
-
-    %% Dependencies
-    DS -- Saves/Finds Data --> DAO
-    DS -- Manages Auth --> DCS
-    DS -- Validates Profile --> DPS
-    DS -- Checks Ownership --> TS
-    DS -- Assigns to Edge --> ES
-    DS -- Manages Relations --> RS
-    DS -- Publishes Events --> EVT
-    DS -- Validates Input --> VAL
-```
+![DeviceServiceImpl SaveDevice PDG](device_service_pdg.png)
 
 ## Insights & Impact
-1.  **Orchestrator Role**: The graph clearly shows `DeviceService` acting as a "Coordinator". It doesn't just write to a database; it coordinates `Credentials`, `Profiles`, `Edges`, and `Relations`. This validates its role as a central Business Logic component.
-2.  **High Coupling**: The service has a high degree of efferent coupling (outgoing dependencies > 10). This is expected for a core entity service but means changes in peripheral services (like `DeviceProfileService`) can easily break `DeviceService`.
-3.  **Transactional Complexity**: The dependency on `EventPublisher` and various other services within a `@Transactional` context (as seen in source code) implies that performance issues in any dependency (e.g., slow `EdgeService` lookup) will lock database transactions for Device updates.
-4.  **Testing Strategy**: Unit testing `DeviceServiceImpl` requires mocking a significant number of dependencies (Dao, Credentials, Profile, Tenant, Edge, etc.), as shown by the number of outgoing nodes in the graph.
+1.  **Critical Path**: The graph shows that `S9 (Save to DAO)` is the sink for almost all data paths. Every upstream decision (Uniquify Name, Validate, Profile Lookup) strictly governs the state of the object reaching `S9`.
+2.  **Control Complexity**: The Control Dependency from `S6` (Profile Check) splits the flow significantly. Validating `DeviceProfile` is a major precondition for persistence; errors here abort the entire flow.
+3.  **Data Integrity**: `S1` determining `oldDevice` feeds into both Name Conflict resolution (`S2`) and Event Publication (`S10`). If `S1` fails or returns stale data (e.g., caching issue), it corrupts both the current update logic and the downstream audit logs.
+4.  **Modification Impact**: The graph demonstrates a robust design for extension. For example, if we need to add a new validation rule (e.g., "Check Label"), we can see exactly where to insert it without breaking the core flow:
+
+### Scenario: Adding a New "Label Check" Rule
+The below **Hypothetical PDG** shows how easily a new rule (`S5.1`) integrates. It simply taps into the existing Control Flow (`S4`) and guards the Data Sink (`S9`), verifying high maintainability.
+
+![Hypothetical PDG with New Label Check](updated%20diagram%20-%20device_service_pdg.png)
