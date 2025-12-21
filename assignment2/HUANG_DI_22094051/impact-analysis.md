@@ -19,6 +19,8 @@ Due to its multiple conditional branches and interactions with several services,
 
 **Graph Type:** Call Graph
 
+![Call Graph – CustomerServiceImpl.saveCustomer](call-graph.png)
+
 The Call Graph models the execution flow of `saveCustomer` and highlights how changes to this method may impact dependent components.
 
 ### Covered Execution Paths:
